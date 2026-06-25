@@ -1,0 +1,1826 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aplikasi Minutes of Meeting</title>
+    <!-- Tailwind CSS untuk styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome untuk ikon -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- html2pdf.js untuk export PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    
+    <style>
+        body { 
+            overflow-x: hidden; 
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        .transition-all { transition: all 0.3s ease; }
+        .pdf-page-break-avoid { page-break-inside: avoid; }
+        
+        /* Mengatasi Reset CSS Tailwind untuk List agar Bullets & Angka Berfungsi */
+        .editor-content ul, #pdfContent ul, .mom-notes-rendered ul {
+            list-style-type: disc !important;
+            padding-left: 1.5rem !important;
+            margin-top: 0.5rem !important;
+            margin-bottom: 0.5rem !important;
+        }
+        .editor-content ol, #pdfContent ol, .mom-notes-rendered ol {
+            list-style-type: decimal !important;
+            padding-left: 1.5rem !important;
+            margin-top: 0.5rem !important;
+            margin-bottom: 0.5rem !important;
+        }
+        .editor-content li, #pdfContent li, .mom-notes-rendered li {
+            margin-bottom: 0.25rem !important;
+            display: list-item !important;
+        }
+        
+        /* Menghilangkan Bullet ganda khusus pada list Daftar Hadir PDF */
+        #pdfAttendees {
+            list-style-type: none !important;
+            padding-left: 0 !important;
+        }
+        #pdfAttendees li {
+            display: flex !important;
+            align-items: center !important;
+        }
+        
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #F6F5F2; }
+        ::-webkit-scrollbar-thumb { background: #8BA39E; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #2D3A31; }
+
+        .preview-paper {
+            width: 794px;
+            min-height: 1123px;
+            box-sizing: border-box;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+            transform-origin: top center;
+        }
+
+        .preview-scroll-container {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .editor-content:empty:before {
+            content: attr(placeholder);
+            color: #aaa;
+            pointer-events: none;
+        }
+        
+        /* Animasi tambahan */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in {
+            animation: fadeIn 0.3s ease-out forwards;
+        }
+    </style>
+</head>
+<body class="bg-[#F6F5F2] text-slate-800 font-sans p-4 md:p-8">
+
+    <div id="toast" class="fixed top-5 right-5 z-[100] transform translate-y-[-100px] opacity-0 transition-all duration-300 max-w-md bg-white border-l-4 p-4 rounded-lg shadow-lg flex items-center gap-3">
+        <div id="toastIcon" class="text-xl"></div>
+        <div>
+            <h4 id="toastTitle" class="font-bold text-sm"></h4>
+            <p id="toastMessage" class="text-xs text-slate-500 mt-0.5"></p>
+        </div>
+    </div>
+
+    <!-- Banner Indikator Edit MoM Lama -->
+    <div id="editModeBanner" class="max-w-4xl mx-auto mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3 hidden flex justify-between items-center shadow-sm">
+        <div class="flex items-center gap-2 text-amber-800 text-xs md:text-sm font-medium">
+            <i class="fas fa-exclamation-triangle text-amber-500"></i>
+            <span>Sedang Menyunting MoM Rapat Lama: <strong id="editModeTargetId"></strong>. Perubahan akan menimpa data lama di database.</span>
+        </div>
+        <button type="button" onclick="cancelMoMEdit()" class="text-xs bg-amber-200 hover:bg-amber-300 text-amber-900 px-3 py-1.5 rounded font-semibold transition-all">
+            Batal Edit
+        </button>
+    </div>
+
+    <div class="max-w-4xl mx-auto bg-white rounded-xl shadow-lg overflow-hidden border border-[#e5e4df]">
+        <div class="bg-[#2D3A31] text-white p-6 flex justify-between items-center">
+            <div>
+                <h1 class="text-2xl font-bold flex items-center gap-3 tracking-wide">
+                    <i class="fas fa-file-signature text-[#D1A792]"></i>
+                    FORMULIR MINUTES OF MEETING
+                </h1>
+                <p class="text-[#8BA39E] mt-2 text-sm">Catat hasil rapat dan tindak lanjut dengan mudah.</p>
+            </div>
+            <button type="button" onclick="openSetupModal()" class="text-white hover:text-[#D1A792] p-3 rounded-full hover:bg-white/10 transition-all" title="Setting & Riwayat">
+                <i class="fas fa-cog text-2xl hover:rotate-90 duration-300"></i>
+            </button>
+        </div>
+
+        <form id="momForm" class="p-6 md:p-8 space-y-8" onsubmit="handleSubmit(event)">
+            
+            <!-- 1. Informasi Rapat -->
+            <section>
+                <h2 class="text-lg font-semibold border-b-2 border-[#8BA39E] pb-2 mb-4 text-[#2D3A31]">1. Informasi Rapat</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="col-span-1 md:col-span-2">
+                        <label class="block text-sm font-medium text-slate-600 mb-1">Judul Rapat <span class="text-red-500">*</span></label>
+                        <input type="text" id="meetingTitle" required class="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#8BA39E] focus:border-[#8BA39E] outline-none transition-all" placeholder="Contoh: Rapat Koordinasi Mingguan Tim Marketing">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-600 mb-1">Tanggal <span class="text-red-500">*</span></label>
+                        <input type="date" id="meetingDate" required class="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#8BA39E] focus:border-[#8BA39E] outline-none transition-all">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-600 mb-1">Waktu Rapat <span class="text-[#8BA39E] text-xs font-semibold">(Format 24 Jam)</span> <span class="text-red-500">*</span></label>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="flex flex-col">
+                                <span class="text-[10px] text-[#8BA39E] font-bold uppercase mb-1">Mulai (Jam : Menit)</span>
+                                <div class="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg p-1.5 focus-within:ring-2 focus-within:ring-[#8BA39E] transition-all">
+                                    <select id="meetingTimeStartHour" required class="w-full text-center outline-none bg-transparent text-sm cursor-pointer"></select>
+                                    <span class="text-slate-400 font-bold text-sm">:</span>
+                                    <select id="meetingTimeStartMin" required class="w-full text-center outline-none bg-transparent text-sm cursor-pointer"></select>
+                                </div>
+                            </div>
+                            <div class="flex flex-col">
+                                <span class="text-[10px] text-[#8BA39E] font-bold uppercase mb-1">Selesai (Jam : Menit)</span>
+                                <div class="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg p-1.5 focus-within:ring-2 focus-within:ring-[#8BA39E] transition-all">
+                                    <select id="meetingTimeEndHour" required class="w-full text-center outline-none bg-transparent text-sm cursor-pointer"></select>
+                                    <span class="text-slate-400 font-bold text-sm">:</span>
+                                    <select id="meetingTimeEndMin" required class="w-full text-center outline-none bg-transparent text-sm cursor-pointer"></select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-span-1 md:col-span-2">
+                        <label class="block text-sm font-medium text-slate-600 mb-1">Lokasi / Tautan Rapat <span class="text-red-500">*</span></label>
+                        <input type="text" id="meetingLocation" required class="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#8BA39E] focus:border-[#8BA39E] outline-none transition-all" placeholder="Ruang Rapat A atau Link Google Meet">
+                    </div>
+                </div>
+            </section>
+
+            <!-- 2. Daftar Hadir -->
+            <section>
+                <h2 class="text-lg font-semibold border-b-2 border-[#8BA39E] pb-2 mb-4 text-[#2D3A31]">2. Daftar Hadir</h2>
+                <div class="bg-[#F6F5F2] border border-[#e5e4df] p-4 rounded-lg">
+                    <p class="text-sm text-[#8BA39E] mb-3 flex items-center gap-2">
+                        <i class="fas fa-spinner fa-spin" id="loadingAttendees"></i> 
+                        <span id="attendeeStatusText">Mengambil daftar peserta...</span>
+                    </p>
+                    
+                    <div id="attendeesList" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-4"></div>
+                    
+                    <div class="border-t border-[#e5e4df] pt-3">
+                        <label class="flex items-center cursor-pointer group">
+                            <input type="checkbox" id="checkLainnya" onchange="toggleLainnya()" class="w-4 h-4 text-[#2D3A31] bg-white border-slate-300 rounded focus:ring-[#8BA39E]">
+                            <span class="ml-2 text-sm font-medium text-slate-700 group-hover:text-[#2D3A31] transition-all">Lainnya (Isi Manual)</span>
+                        </label>
+                        <div id="containerLainnya" class="hidden mt-3">
+                            <input type="text" id="inputLainnya" oninput="handleAttendeesChange()" class="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#8BA39E] focus:border-[#8BA39E] outline-none text-sm" placeholder="Masukkan nama peserta (pisahkan dengan koma)">
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 3. Agenda & Tindak Lanjut -->
+            <section>
+                <h2 class="text-lg font-semibold border-b-2 border-[#8BA39E] pb-2 mb-4 text-[#2D3A31]">3. Agenda & Hasil Pembahasan</h2>
+                
+                <div id="savedAgendasContainer" class="space-y-3 mb-6 empty:hidden"></div>
+
+                <div id="agendaInputForm" class="bg-[#F6F5F2] border border-[#e5e4df] p-5 rounded-xl shadow-sm transition-all duration-300">
+                    <h3 id="agendaFormHeader" class="font-semibold text-[#2D3A31] mb-4 flex items-center gap-2">
+                        <i class="fas fa-edit text-[#D1A792]"></i> 
+                        <span>Form Input Agenda</span>
+                    </h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-[#2D3A31] mb-1">Topik Pembahasan <span class="text-red-500">*</span></label>
+                            <input type="text" id="currentAgendaTitle" class="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#8BA39E] focus:border-[#8BA39E] outline-none" placeholder="Contoh: Evaluasi Kampanye Bulan Lalu">
+                        </div>
+                        
+                        <!-- Rich Text Editor: Catatan Pembahasan -->
+                        <div>
+                            <label class="block text-sm font-medium text-[#2D3A31] mb-1">Pembahasan / Catatan</label>
+                            <div class="border border-slate-300 rounded-lg overflow-hidden bg-white focus-within:ring-2 focus-within:ring-[#8BA39E] transition-all">
+                                <div class="flex flex-wrap items-center gap-1 bg-[#F6F5F2] px-3 py-2 border-b border-slate-200">
+                                    <button type="button" onclick="formatDoc('bold', 'currentAgendaNotes')" class="p-1 px-2.5 text-xs font-bold text-[#2D3A31] hover:bg-slate-200 rounded transition-colors" title="Bold">B</button>
+                                    <button type="button" onclick="formatDoc('italic', 'currentAgendaNotes')" class="p-1 px-2.5 text-xs italic text-[#2D3A31] hover:bg-slate-200 rounded transition-colors" title="Italic">I</button>
+                                    <button type="button" onclick="formatDoc('underline', 'currentAgendaNotes')" class="p-1 px-2.5 text-xs underline text-[#2D3A31] hover:bg-slate-200 rounded transition-colors" title="Underline">U</button>
+                                    <div class="h-4 w-[1px] bg-slate-300 mx-1"></div>
+                                    <button type="button" onclick="formatDoc('justifyLeft', 'currentAgendaNotes')" class="p-1 px-2 text-xs text-[#2D3A31] hover:bg-slate-200 rounded transition-colors" title="Rata Kiri"><i class="fas fa-align-left"></i></button>
+                                    <button type="button" onclick="formatDoc('justifyCenter', 'currentAgendaNotes')" class="p-1 px-2 text-xs text-[#2D3A31] hover:bg-slate-200 rounded transition-colors" title="Rata Tengah"><i class="fas fa-align-center"></i></button>
+                                    <div class="h-4 w-[1px] bg-slate-300 mx-1"></div>
+                                    <button type="button" onclick="formatDoc('insertUnorderedList', 'currentAgendaNotes')" class="p-1 px-2.5 text-xs text-[#2D3A31] hover:bg-slate-200 rounded transition-colors" title="Bullet List"><i class="fas fa-list-ul mr-1"></i> List</button>
+                                    <button type="button" onclick="formatDoc('insertOrderedList', 'currentAgendaNotes')" class="p-1 px-2.5 text-xs text-[#2D3A31] hover:bg-slate-200 rounded transition-colors" title="Numbered List"><i class="fas fa-list-ol mr-1"></i> Angka</button>
+                                </div>
+                                <div id="currentAgendaNotes" class="editor-content w-full p-3 min-h-[120px] outline-none text-sm text-slate-700 bg-white" contenteditable="true" placeholder="Catat detail pembahasan dari agenda ini..."></div>
+                            </div>
+                            
+                            <!-- BAGIAN LAMPIRAN TERPISAH (PEMBAHASAN) -->
+                            <div class="mt-2 bg-slate-50 p-2 border border-slate-200 rounded-lg">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                                        <i class="fas fa-paperclip text-slate-400"></i> Lampiran Pembahasan
+                                    </span>
+                                    <button type="button" onclick="document.getElementById('notesFileInput').click()" class="text-xs text-emerald-700 hover:text-emerald-900 bg-emerald-100/50 hover:bg-emerald-100 px-2.5 py-1 rounded transition-colors flex items-center gap-1 font-bold">
+                                        <i class="fas fa-plus"></i> Tambah Lampiran
+                                    </button>
+                                </div>
+                                <input type="file" id="notesFileInput" class="hidden" multiple onchange="handleFileUpload(this, 'notes')">
+                                <div id="notesFilesList" class="flex flex-wrap gap-2 mt-2 empty:hidden"></div>
+                            </div>
+                        </div>
+
+                        <!-- Rich Text Editor: Keputusan Bersama -->
+                        <div>
+                            <label class="block text-sm font-medium text-[#2D3A31] mb-1">Keputusan</label>
+                            <div class="border border-slate-300 rounded-lg overflow-hidden bg-white focus-within:ring-2 focus-within:ring-[#8BA39E] transition-all">
+                                <div class="flex flex-wrap items-center gap-1 bg-[#F6F5F2] px-3 py-2 border-b border-slate-200">
+                                    <button type="button" onclick="formatDoc('bold', 'currentAgendaDecision')" class="p-1 px-2.5 text-xs font-bold text-[#2D3A31] hover:bg-slate-200 rounded transition-colors" title="Bold">B</button>
+                                    <button type="button" onclick="formatDoc('italic', 'currentAgendaDecision')" class="p-1 px-2.5 text-xs italic text-[#2D3A31] hover:bg-slate-200 rounded transition-colors" title="Italic">I</button>
+                                    <button type="button" onclick="formatDoc('underline', 'currentAgendaDecision')" class="p-1 px-2.5 text-xs underline text-[#2D3A31] hover:bg-slate-200 rounded transition-colors" title="Underline">U</button>
+                                    <div class="h-4 w-[1px] bg-slate-300 mx-1"></div>
+                                    <button type="button" onclick="formatDoc('justifyLeft', 'currentAgendaDecision')" class="p-1 px-2 text-xs text-[#2D3A31] hover:bg-slate-200 rounded transition-colors" title="Rata Kiri"><i class="fas fa-align-left"></i></button>
+                                    <button type="button" onclick="formatDoc('justifyCenter', 'currentAgendaDecision')" class="p-1 px-2 text-xs text-[#2D3A31] hover:bg-slate-200 rounded transition-colors" title="Rata Tengah"><i class="fas fa-align-center"></i></button>
+                                    <div class="h-4 w-[1px] bg-slate-300 mx-1"></div>
+                                    <button type="button" onclick="formatDoc('insertUnorderedList', 'currentAgendaDecision')" class="p-1 px-2.5 text-xs text-[#2D3A31] hover:bg-slate-200 rounded transition-colors" title="Bullet List"><i class="fas fa-list-ul mr-1"></i> List</button>
+                                    <button type="button" onclick="formatDoc('insertOrderedList', 'currentAgendaDecision')" class="p-1 px-2.5 text-xs text-[#2D3A31] hover:bg-slate-200 rounded transition-colors" title="Numbered List"><i class="fas fa-list-ol mr-1"></i> Angka</button>
+                                </div>
+                                <div id="currentAgendaDecision" class="editor-content w-full p-3 min-h-[80px] outline-none text-sm text-slate-700 bg-amber-50/10" contenteditable="true" placeholder="Catat hasil kesepakatan final atau keputusan resmi di agenda ini..."></div>
+                            </div>
+                            
+                            <!-- BAGIAN LAMPIRAN TERPISAH (KEPUTUSAN) -->
+                            <div class="mt-2 bg-slate-50 p-2 border border-slate-200 rounded-lg">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                                        <i class="fas fa-paperclip text-slate-400"></i> Lampiran Keputusan
+                                    </span>
+                                    <button type="button" onclick="document.getElementById('decisionFileInput').click()" class="text-xs text-emerald-700 hover:text-emerald-900 bg-emerald-100/50 hover:bg-emerald-100 px-2.5 py-1 rounded transition-colors flex items-center gap-1 font-bold">
+                                        <i class="fas fa-plus"></i> Tambah Lampiran
+                                    </button>
+                                </div>
+                                <input type="file" id="decisionFileInput" class="hidden" multiple onchange="handleFileUpload(this, 'decision')">
+                                <div id="decisionFilesList" class="flex flex-wrap gap-2 mt-2 empty:hidden"></div>
+                            </div>
+                        </div>
+
+                        <div class="bg-white p-4 rounded-lg border border-[#e5e4df] mt-2">
+                            <div class="flex justify-between items-center mb-3 border-b pb-2 border-[#F6F5F2]">
+                                <h4 class="text-sm font-semibold text-[#2D3A31]">Tindak Lanjut (Action Items) - <span class="text-slate-400 font-normal">Opsional</span></h4>
+                                <button type="button" onclick="addCurrentActionItem()" class="text-xs bg-[#D1A792] text-white px-3 py-1.5 rounded hover:bg-[#b58f7a] font-medium transition-all shadow-sm">
+                                    <i class="fas fa-plus mr-1"></i> Tambah Tugas
+                                </button>
+                            </div>
+                            <div id="currentActionItems" class="space-y-3"></div>
+                        </div>
+
+                        <div class="flex justify-end pt-3 border-t border-[#e5e4df] mt-4 gap-2">
+                            <button type="button" id="saveAgendaBtn" onclick="saveCurrentAgenda()" class="bg-[#8BA39E] hover:bg-[#728783] text-white px-5 py-2.5 rounded-lg text-sm font-semibold shadow-sm transition-all flex items-center gap-2">
+                                <i class="fas fa-save"></i> Simpan & Tambah Agenda Baru
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <div class="pt-6 border-t border-[#e5e4df] mt-8 flex flex-col md:flex-row justify-end gap-3">
+                <button type="button" onclick="openPreview()" class="bg-[#8BA39E] hover:bg-[#728783] text-white font-semibold py-2.5 px-6 rounded-lg shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-2">
+                    <i class="fas fa-search"></i>
+                    Pratinjau & Unduh PDF
+                </button>
+                <button type="submit" id="submitBtn" class="bg-[#2D3A31] hover:bg-[#1f2923] text-white font-semibold py-2.5 px-6 rounded-lg shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-2">
+                    <i class="fas fa-database text-[#D1A792]"></i>
+                    Simpan ke Google Sheets
+                </button>
+            </div>
+        </form>
+
+        <div id="successMessage" class="hidden p-8 text-center bg-[#F6F5F2]">
+            <div class="w-16 h-16 bg-[#2D3A31] text-[#D1A792] rounded-full flex items-center justify-center mx-auto mb-4 shadow animate-bounce">
+                <i class="fas fa-check text-2xl"></i>
+            </div>
+            <h2 class="text-2xl font-bold text-[#2D3A31] mb-2">MoM Berhasil Disimpan!</h2>
+            <p class="text-slate-600 mb-6" id="successDesc">Data notulen rapat telah sukses dikirimkan ke Google Sheets.</p>
+            
+            <div class="flex flex-col md:flex-row justify-center gap-3 mt-6">
+                <button onclick="shareToWhatsApp()" class="bg-[#25D366] hover:bg-[#1ebd53] text-white font-medium py-2 px-6 rounded-lg transition-all flex items-center justify-center gap-2 shadow-sm">
+                    <i class="fab fa-whatsapp text-lg"></i> Bagikan ke WhatsApp
+                </button>
+                <button onclick="openPreview()" class="bg-[#8BA39E] hover:bg-[#728783] text-white font-medium py-2 px-6 rounded-lg transition-all flex items-center justify-center gap-2 shadow-sm">
+                    <i class="fas fa-file-pdf"></i> Pratinjau PDF
+                </button>
+                <button onclick="resetForm()" class="bg-white border border-[#e5e4df] hover:bg-slate-50 text-[#2D3A31] font-medium py-2 px-6 rounded-lg transition-all shadow-sm">
+                    Buat MoM Baru
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- MODAL PRATINJAU PDF                        -->
+    <!-- ========================================== -->
+    <div id="pdfModal" class="fixed inset-0 bg-[#2D3A31]/85 z-50 hidden flex flex-col justify-center items-center backdrop-blur-sm p-4 transition-all">
+        <div class="w-full max-w-4xl flex justify-between items-center mb-4">
+            <h3 class="text-white font-bold text-xl"><i class="fas fa-file-pdf text-[#D1A792] mr-2"></i> Pratinjau Laporan</h3>
+            <button onclick="closePreview()" class="text-white hover:text-[#D1A792] transition-colors p-2">
+                <i class="fas fa-times text-2xl"></i>
+            </button>
+        </div>
+        
+        <div class="w-full max-w-4xl bg-[#eae9e4] rounded-xl shadow-2xl overflow-hidden h-[75vh] flex flex-col">
+            <div class="flex-1 overflow-y-auto overflow-x-auto p-4 md:p-8 flex justify-center items-start animate-fade-in" id="previewCanvasContainer">
+                <div id="pdfContent" class="preview-paper bg-[#F6F5F2] p-12 text-slate-800 font-sans box-border" style="width: 794px; min-height: 1123px;">
+                    <h1 class="text-[2.2rem] font-black text-[#2D3A31] mb-8 uppercase tracking-widest text-center border-b-4 border-[#2D3A31] pb-4">
+                        Meeting Minutes
+                    </h1>
+
+                    <div class="grid grid-cols-2 gap-6 mb-8">
+                        <div class="bg-[#2D3A31] text-white p-5 rounded shadow-sm border-t-4 border-[#8BA39E]">
+                            <div class="flex items-center gap-3 border-b border-white/20 pb-3 mb-3">
+                                <i class="far fa-clock text-xl text-[#8BA39E]"></i>
+                                <h2 class="text-sm uppercase tracking-wider font-semibold">Date and Time</h2>
+                            </div>
+                            <div class="text-[0.95rem] leading-relaxed">
+                                <p><span class="opacity-75 inline-block w-20">Tanggal</span> : <strong id="pdfDate" class="font-medium text-white"></strong></p>
+                                <p><span class="opacity-75 inline-block w-20">Waktu</span> : <strong id="pdfTime" class="font-medium text-white"></strong></p>
+                                <p><span class="opacity-75 inline-block w-20">Lokasi</span> : <strong id="pdfLocation" class="font-medium text-white"></strong></p>
+                            </div>
+                        </div>
+
+                        <div class="bg-[#2D3A31] text-white p-5 rounded shadow-sm border-t-4 border-[#D1A792]">
+                            <div class="flex items-center gap-3 border-b border-white/20 pb-3 mb-3">
+                                <i class="fas fa-bullseye text-xl text-[#D1A792]"></i>
+                                <h2 class="text-sm uppercase tracking-wider font-semibold">Meeting Title</h2>
+                            </div>
+                            <div class="text-[0.95rem] font-medium leading-relaxed">
+                                <p id="pdfTitle" class="italic text-white"></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-6">
+                        <div class="col-span-1 space-y-6">
+                            <div class="bg-white p-5 rounded shadow-sm border-t-[5px] border-[#2D3A31] pdf-page-break-avoid">
+                                <div class="flex items-center gap-3 border-b pb-2 mb-3 border-[#F6F5F2]">
+                                    <i class="fas fa-users-cog text-[#2D3A31] text-lg"></i>
+                                    <h3 class="text-[#2D3A31] font-bold uppercase text-sm tracking-wide">Attendees</h3>
+                                </div>
+                                <ul id="pdfAttendees" class="text-sm space-y-2 list-none pl-1 text-slate-700 font-medium"></ul>
+                            </div>
+                        </div>
+
+                        <div class="col-span-2 space-y-6">
+                            <div class="bg-white p-6 rounded shadow-sm border-t-[5px] border-[#8BA39E]">
+                                <div class="flex items-center gap-3 border-b pb-2 mb-4 border-[#F6F5F2]">
+                                    <i class="far fa-comments text-[#8BA39E] text-lg"></i>
+                                    <h3 class="text-[#2D3A31] font-bold uppercase text-sm tracking-wide">Discussions & Tasks</h3>
+                                </div>
+                                <div id="pdfDiscussions" class="space-y-6 text-[0.95rem] text-slate-800 leading-relaxed"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="bg-white border-t border-[#e5e4df] p-4 flex justify-end gap-3 rounded-b-xl flex-wrap">
+                <button onclick="closePreview()" class="bg-[#F6F5F2] hover:bg-[#e5e4df] text-[#2D3A31] font-medium py-2 px-6 rounded-lg transition-all">
+                    Tutup
+                </button>
+                <button onclick="shareToWhatsApp()" class="bg-[#25D366] hover:bg-[#1ebd53] text-white font-medium py-2 px-6 rounded-lg transition-all flex items-center gap-2 shadow-sm">
+                    <i class="fab fa-whatsapp text-lg"></i> Bagikan ke WhatsApp
+                </button>
+                <button onclick="performDownload()" class="bg-[#2D3A31] hover:bg-[#1f2923] text-white font-medium py-2 px-6 rounded-lg transition-all flex items-center gap-2 shadow-sm">
+                    <i class="fas fa-download"></i> Unduh Sekarang
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- MODAL SETTING APLIKASI (RIWAYAT & SETUP)   -->
+    <!-- ========================================== -->
+    <div id="setupModal" class="fixed inset-0 bg-[#2D3A31]/85 z-50 hidden flex flex-col justify-center items-center backdrop-blur-sm p-4 transition-all">
+        <div class="w-full max-w-md bg-white rounded-xl shadow-2xl overflow-hidden flex flex-col relative animate-fade-in max-h-[90vh]">
+            <button onclick="closeSetupModal()" class="absolute top-4 right-4 text-slate-400 hover:text-red-500 transition-colors z-10">
+                <i class="fas fa-times text-xl"></i>
+            </button>
+
+            <div class="p-6 md:p-8 space-y-5 overflow-y-auto">
+                <div class="text-center">
+                    <div class="w-14 h-14 bg-[#F6F5F2] text-[#D1A792] rounded-full flex items-center justify-center mx-auto mb-2 shadow-sm border border-[#e5e4df]">
+                        <i class="fas fa-sliders-h text-xl"></i>
+                    </div>
+                    <h3 class="font-bold text-xl text-[#2D3A31]">Setting Aplikasi</h3>
+                    <p class="text-xs text-slate-500 mt-1">Kelola data riwayat laporan rapat lama dan lakukan setup awal database Google Sheets Anda.</p>
+                </div>
+
+                <div class="border-t border-slate-100 pt-4 space-y-3">
+                    <h4 class="font-bold text-xs text-[#2D3A31] uppercase tracking-wider flex items-center gap-1.5"><i class="fas fa-history text-[#8BA39E]"></i> Riwayat MoM Rapat</h4>
+                    <p class="text-[11px] text-slate-400">Pilih tanggal terlebih dahulu untuk mencari daftar MoM rapat lama yang terdaftar.</p>
+                    
+                    <div class="space-y-2.5">
+                        <div>
+                            <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">1. Pilih Tanggal Rapat</label>
+                            <input type="date" id="filterMoMDate" onchange="filterMoMByDate()" class="w-full p-2.5 border border-slate-300 rounded-lg text-xs bg-white focus:ring-2 focus:ring-[#8BA39E] focus:border-[#8BA39E] outline-none">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">2. Pilih Rapat pada Tanggal ini</label>
+                            <select id="selectMoM" disabled class="w-full p-2.5 border border-slate-300 rounded-lg text-xs bg-slate-100 focus:ring-2 focus:ring-[#8BA39E] focus:border-[#8BA39E] outline-none">
+                                <option value="">-- Pilih Tanggal Terlebih Dahulu --</option>
+                            </select>
+                        </div>
+
+                        <p id="filterStatusText" class="text-[11px] italic hidden"></p>
+
+                        <button type="button" id="btnLoadSelected" disabled onclick="loadSelectedMoM()" class="w-full bg-[#8BA39E] hover:bg-[#728783] text-white font-semibold py-2 px-4 rounded-lg text-xs transition-all flex items-center justify-center gap-1.5 opacity-50 cursor-not-allowed">
+                            <i class="fas fa-folder-open"></i> Buka & Edit MoM
+                        </button>
+                    </div>
+                </div>
+
+                <div class="border-t border-slate-100 pt-4 space-y-2">
+                    <h4 class="font-bold text-xs text-[#2D3A31] uppercase tracking-wider flex items-center gap-1.5"><i class="fas fa-tools text-[#D1A792]"></i> Setup Google Sheet</h4>
+                    <p class="text-[11px] text-slate-400">Buat tab database format JSON secara otomatis beserta penulisan struktur header tabel.</p>
+                    <button type="button" id="btnInitDb" onclick="executeDatabaseSetup()" class="w-full bg-[#2D3A31] hover:bg-[#1f2923] text-white font-semibold py-2 px-4 rounded-lg text-xs transition-all flex items-center justify-center gap-1.5 shadow-sm">
+                        <i class="fas fa-magic text-[#D1A792]"></i> Mulai Inisialisasi Database
+                    </button>
+                </div>
+            </div>
+            
+            <div class="bg-[#F6F5F2] border-t border-[#e5e4df] p-4 flex justify-end">
+                <button onclick="closeSetupModal()" class="w-full bg-white border border-[#e5e4df] hover:bg-slate-50 text-[#2D3A31] font-semibold py-2 px-6 rounded-lg text-xs transition-all shadow-sm">
+                    Tutup Setting
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- MODAL ERROR OTORISASI GOOGLE DRIVE         -->
+    <!-- ========================================== -->
+    <div id="authErrorModal" class="fixed inset-0 bg-[#2D3A31]/90 z-[200] hidden flex flex-col justify-center items-center backdrop-blur-sm p-4 transition-all">
+        <div class="bg-white max-w-md w-full rounded-2xl shadow-2xl overflow-hidden text-center animate-fade-in">
+            <div class="bg-red-500 text-white p-6">
+                <i class="fas fa-shield-alt text-5xl mb-3"></i>
+                <h3 class="font-bold text-xl">Izin Akses Tulis Diperlukan</h3>
+            </div>
+            <div class="p-6 text-slate-700 text-sm space-y-4">
+                <p>Google mendeteksi upaya pembuatan file baru (<code class="bg-slate-100 text-red-500 px-1 rounded">createFile</code>) namun skrip Anda belum diberikan hak akses tulis ke Google Drive.</p>
+                <div class="bg-red-50 p-4 rounded-lg border border-red-100 text-left text-xs text-red-800 max-h-64 overflow-y-auto">
+                    <p class="font-bold mb-2 uppercase tracking-wide text-[10px]">Panduan Perbaikan Langkah-demi-Langkah:</p>
+                    <ol class="list-decimal pl-4 space-y-2 font-medium">
+                        <li>Buka editor <b>Google Apps Script</b> Anda.</li>
+                        <li>Di menu sebelah kiri, klik <b>Setelan (Project Settings)</b> berbentuk roda gigi.</li>
+                        <li>Centang kotak <b>"Tampilkan file manifes 'appsscript.json' di editor"</b>.</li>
+                        <li>Klik kembali menu <b>Editor</b> (ikon &lt;&gt;) di kiri atas.</li>
+                        <li>Buka file <b>appsscript.json</b> yang kini muncul, dan tambahkan kode ini sebelum kurung kurawal penutup terakhir:
+                            <pre class="bg-white p-2 mt-1 rounded border border-red-200 text-[9px] overflow-x-auto">"oauthScopes": [
+  "https://www.googleapis.com/auth/drive",
+  "https://www.googleapis.com/auth/spreadsheets"
+]</pre>
+                        </li>
+                        <li>Simpan (Ctrl+S). Lalu buka file <b>Kode.gs</b>.</li>
+                        <li>Pilih fungsi <b>otorisasiDrive</b> di bagian atas dan klik <b>Jalankan (Run)</b>.</li>
+                        <li>Lakukan proses otorisasi <i>(Review Permissions -> akun -> Advanced -> Go to... unsafe -> Allow)</i>.</li>
+                        <li>Wajib: Klik <b>Deploy</b> -> <b>Manage deployments</b> -> Edit (ikon pencil) -> Versi: <b>New Version</b> -> <b>Deploy</b>.</li>
+                    </ol>
+                </div>
+                <button type="button" onclick="document.getElementById('authErrorModal').classList.add('hidden')" class="w-full bg-[#2D3A31] hover:bg-[#1f2923] text-white py-3 rounded-lg font-bold transition-colors mt-2 shadow-md">
+                    Saya Mengerti & Akan Memperbaiki
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript untuk Logika Frontend -->
+    <script>
+        let savedAgendasData = [];
+        let editingAgendaIndex = null; 
+        let currentIdRapat = null; 
+        let allMoMsData = []; 
+
+        // State penyimpanan sementara lampiran per agenda aktif
+        let currentNotesFiles = [];
+        let currentDecisionFiles = [];
+
+        // URL Web App Google Apps Script Anda (Telah terhubung secara permanen)
+        // PENTING: Ganti URL di bawah ini dengan URL hasil "Penerapan Baru" (New Deployment) Anda yang berakhiran /exec
+        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxvUZlDYQT6aniojzeo3uZTyWMFvVD3hrRB-J_1xz6E21RwFcSIVMGeDl-Q818hdVNmIQ/exec";
+
+        // Data Mock Peserta Rapat (Digunakan jika database kosong / error)
+        const mockSheetAttendees = [
+            "Andi Saputra", "Budi Santoso", "Citra Kirana", 
+            "Dewi Lestari", "Eka Pratama", "Fajar Nugroho", 
+            "Gilang Ramadhan", "Hana Pertiwi"
+        ];
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('meetingDate').value = today;
+            
+            checkEnvironment();
+            initTimeDropdowns(); 
+            loadAttendees();
+        });
+
+        // --- SISTEM TOAST NOTIFIKASI KUSTOM ---
+        function showToast(title, message, type = 'info') {
+            const toast = document.getElementById('toast');
+            const icon = document.getElementById('toastIcon');
+            const toastTitle = document.getElementById('toastTitle');
+            const toastMsg = document.getElementById('toastMessage');
+
+            toastTitle.innerText = title;
+            toastMsg.innerText = message;
+
+            if (type === 'success') {
+                toast.className = "fixed top-5 right-5 z-[100] transform transition-all duration-300 max-w-md bg-white border-l-4 border-emerald-500 p-4 rounded-lg shadow-lg flex items-center gap-3 opacity-100 translate-y-0";
+                icon.innerHTML = '<i class="fas fa-check-circle text-emerald-500"></i>';
+            } else if (type === 'error') {
+                toast.className = "fixed top-5 right-5 z-[100] transform transition-all duration-300 max-w-md bg-white border-l-4 border-red-500 p-4 rounded-lg shadow-lg flex items-center gap-3 opacity-100 translate-y-0";
+                icon.innerHTML = '<i class="fas fa-exclamation-circle text-red-500"></i>';
+            } else {
+                toast.className = "fixed top-5 right-5 z-[100] transform transition-all duration-300 max-w-md bg-white border-l-4 border-blue-500 p-4 rounded-lg shadow-lg flex items-center gap-3 opacity-100 translate-y-0";
+                icon.innerHTML = '<i class="fas fa-info-circle text-blue-500"></i>';
+            }
+
+            // Sembunyikan setelah 4 detik
+            setTimeout(() => {
+                toast.className = "fixed top-5 right-5 z-[100] transform translate-y-[-100px] opacity-0 transition-all duration-300 max-w-md bg-white border-l-4 p-4 rounded-lg shadow-lg flex items-center gap-3";
+            }, 4000);
+        }
+
+        // --- CEK LINGKUNGAN SISTEM ---
+        function isGoogleAppsScript() {
+            return (typeof google !== 'undefined' && google.script && google.script.run);
+        }
+
+        function checkEnvironment() {
+            if (isGoogleAppsScript()) {
+                console.log("Mode: Native Web App (Google Apps Script)");
+            } else {
+                console.log("Mode: External Web App (GitHub / Google Sites via Fetch CORS)");
+            }
+        }
+
+        // --- Rich Text Formatter ---
+        function formatDoc(command, targetId) {
+            const editor = document.getElementById(targetId);
+            if (editor) {
+                editor.focus();
+                document.execCommand(command, false, null);
+            }
+        }
+
+        // --- PARSER UNTUK EKSTRAKSI DATA LAMPIRAN DARI TEXT HTML ---
+        function extractAttachments(htmlString, type) {
+            if (!htmlString) return { cleanHtml: "", files: [] };
+            const temp = document.createElement('div');
+            temp.innerHTML = htmlString;
+            const markerClass = type === 'notes' ? '.mom-files-notes' : '.mom-files-decision';
+            const fileDiv = temp.querySelector(markerClass);
+            let files = [];
+            if (fileDiv) {
+                try {
+                    files = JSON.parse(fileDiv.innerText);
+                } catch(e) {}
+                fileDiv.remove(); // Bersihkan tag metadata tersembunyi dari teks editor
+            }
+            return {
+                cleanHtml: temp.innerHTML,
+                files: files
+            };
+        }
+
+        // --- PROSES MULTI-UPLOAD BERKAS KE GOOGLE DRIVE ---
+        async function handleFileUpload(inputElement, type) {
+            const files = inputElement.files;
+            if (!files || files.length === 0) return;
+
+            showToast("Mengunggah...", `Sedang memproses ${files.length} file ke Google Drive...`, "info");
+
+            // Ambil data untuk penamaan file otomatis (Tanggal & Topik)
+            const meetingDate = document.getElementById('meetingDate').value || 'TanpaTanggal';
+            const rawAgendaTitle = document.getElementById('currentAgendaTitle').value.trim();
+            let agendaTitleSafe = 'Topik_Agenda';
+            if (rawAgendaTitle) {
+                agendaTitleSafe = rawAgendaTitle.replace(/[^a-zA-Z0-9]+/g, '_').replace(/(^_|_$)/g, '').substring(0, 30);
+            }
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                try {
+                    const base64Data = await fileToBase64(file);
+                    const base64Clean = base64Data.split(',')[1];
+                    
+                    // Buat format nama baru: Tanggal_TopikPembahasan_KodeUnik.ekstensi
+                    const fileExt = file.name.split('.').pop();
+                    const uniqueCode = Math.random().toString(36).substring(2, 6).toUpperCase(); 
+                    const newFileName = `${meetingDate}_${agendaTitleSafe}_${uniqueCode}.${fileExt}`;
+
+                    const uploadResult = await callBackend('uploadFile', {
+                        base64: base64Clean,
+                        name: newFileName, 
+                        type: file.type
+                    });
+
+                    // Tambahkan ke array state aktif yang sesuai
+                    const fileObject = { name: newFileName, url: uploadResult.url };
+                    if (type === 'notes') {
+                        currentNotesFiles.push(fileObject);
+                    } else {
+                        currentDecisionFiles.push(fileObject);
+                    }
+
+                    renderActiveFilesList(type);
+                    showToast("Unggah Sukses", `Berkas "${newFileName}" berhasil diunggah!`, "success");
+                } catch (err) {
+                    console.error("Gagal mengunggah file:", err);
+                    
+                    // Deteksi jika kegagalan disebabkan oleh masalah izin otorisasi Google Drive
+                    const errMsg = (err.message || "").toLowerCase();
+                    if (errMsg.includes("izin") || errMsg.includes("permission") || errMsg.includes("driveapp") || errMsg.includes("getfoldersbyname") || errMsg.includes("createfile") || errMsg.includes("auth/drive")) {
+                        document.getElementById('authErrorModal').classList.remove('hidden');
+                    } else {
+                        showToast("Gagal Unggah", `Gagal memproses "${file.name}": ${err.message}`, "error");
+                    }
+                }
+            }
+            inputElement.value = '';
+        }
+
+        // Render lampiran aktif di bawah masing-masing kotak editor agenda
+        function renderActiveFilesList(type) {
+            const listContainer = document.getElementById(`${type}FilesList`);
+            const filesArray = type === 'notes' ? currentNotesFiles : currentDecisionFiles;
+            listContainer.innerHTML = '';
+            
+            filesArray.forEach((file, index) => {
+                let iconClass = "fa-file-alt text-slate-500";
+                if (file.name.toLowerCase().endsWith(".pdf")) iconClass = "fa-file-pdf text-red-500";
+                else if (file.name.toLowerCase().endsWith(".doc") || file.name.toLowerCase().endsWith(".docx")) iconClass = "fa-file-word text-blue-500";
+                else if (file.name.toLowerCase().endsWith(".xls") || file.name.toLowerCase().endsWith(".xlsx")) iconClass = "fa-file-excel text-emerald-500";
+                else if (/\.(jpg|jpeg|png|gif|webp)$/i.test(file.name)) iconClass = "fa-file-image text-amber-500";
+                
+                const chip = document.createElement('span');
+                chip.className = "inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-slate-200 rounded text-slate-700 text-xs font-semibold shadow-sm animate-fade-in";
+                chip.innerHTML = `
+                    <a href="${file.url}" target="_blank" class="hover:text-[#2D3A31] hover:underline flex items-center gap-1.5">
+                        <i class="fas ${iconClass}"></i> ${file.name}
+                    </a>
+                    <span class="w-[1px] h-3 bg-slate-300 mx-0.5"></span>
+                    <button type="button" onclick="removeActiveFile('${type}', ${index})" class="text-red-400 hover:text-red-600 transition-colors" title="Hapus Lampiran">
+                        <i class="fas fa-times text-[10px]"></i>
+                    </button>
+                `;
+                listContainer.appendChild(chip);
+            });
+        }
+
+        function removeActiveFile(type, index) {
+            if (type === 'notes') {
+                currentNotesFiles.splice(index, 1);
+            } else {
+                currentDecisionFiles.splice(index, 1);
+            }
+            renderActiveFilesList(type);
+        }
+
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = error => reject(error);
+            });
+        }
+
+        // --- INISIALISASI TIMEDROPWNS FORMAT 24 JAM ---
+        function initTimeDropdowns() {
+            const startHourSelect = document.getElementById('meetingTimeStartHour');
+            const startMinSelect = document.getElementById('meetingTimeStartMin');
+            const endHourSelect = document.getElementById('meetingTimeEndHour');
+            const endMinSelect = document.getElementById('meetingTimeEndMin');
+
+            let hourOptions = '';
+            for (let i = 0; i < 24; i++) {
+                const hStr = i.toString().padStart(2, '0');
+                hourOptions += `<option value="${hStr}">${hStr}</option>`;
+            }
+            startHourSelect.innerHTML = hourOptions;
+            endHourSelect.innerHTML = hourOptions;
+
+            let minOptions = '';
+            for (let i = 0; i < 60; i++) {
+                const mStr = i.toString().padStart(2, '0');
+                minOptions += `<option value="${mStr}">${mStr}</option>`;
+            }
+            startMinSelect.innerHTML = minOptions;
+            endMinSelect.innerHTML = minOptions;
+
+            startHourSelect.value = "09";
+            startMinSelect.value = "00";
+            endHourSelect.value = "10";
+            endMinSelect.value = "00";
+        }
+
+        // --- PROMISE UNTUK KOMUNIKASI BACKEND (DENGAN PENANGANAN ERROR KONEKSI/FETCH FAILED) ---
+        async function callBackend(action, data = null) {
+            if (isGoogleAppsScript()) {
+                return new Promise((resolve, reject) => {
+                    if (action === 'getAttendees') {
+                        google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getAttendees();
+                    } else if (action === 'setupDatabase') {
+                        google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).setupDatabase();
+                    } else if (action === 'saveMoM') {
+                        google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).saveMoM(data);
+                    } else if (action === 'getMoMList') {
+                        google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getMoMList();
+                    } else if (action === 'getMoMDetails') {
+                        google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).getMoMDetails(data);
+                    } else if (action === 'uploadFile') {
+                        google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).uploadFileToDrive(data);
+                    }
+                });
+            } else {
+                const useGet = (action === 'getAttendees' || action === 'getMoMList');
+                const url = useGet ? `${WEB_APP_URL}?action=${action}` : WEB_APP_URL;
+                
+                const options = {
+                    method: useGet ? 'GET' : 'POST',
+                    headers: {
+                        'Content-Type': 'text/plain;charset=utf-8' 
+                    }
+                };
+                
+                if (!useGet) {
+                    options.body = JSON.stringify({ action: action, data: data });
+                }
+
+                try {
+                    const response = await fetch(url, options);
+                    if (!response.ok) {
+                        throw new Error(`HTTP Error! Status: ${response.status}`);
+                    }
+                    const resData = await response.json();
+                    
+                    if (resData.success) {
+                        return resData.data;
+                    } else {
+                        throw new Error(resData.error || "Gagal menghubungi server Apps Script.");
+                    }
+                } catch(err) {
+                    console.error("Terjadi error saat memanggil backend:", err);
+                    
+                    const errMsg = err.message.toLowerCase();
+                    if (err.name === 'TypeError' || errMsg.includes('failed to fetch')) {
+                        showToast(
+                            "Koneksi Tertunda", 
+                            "Gagal menghubungi Apps Script Anda. Pastikan status deployment-nya aktif pada URL yang terpasang di kode HTML.", 
+                            "error"
+                        );
+                    }
+                    
+                    // Fallback list kosongan agar tidak crash total
+                    if (action === 'getAttendees') {
+                        return mockSheetAttendees;
+                    } else if (action === 'getMoMList') {
+                        return [];
+                    }
+                    throw err;
+                }
+            }
+        }
+
+        // --- Logika Bagian Kehadiran ---
+        function loadAttendees() {
+            const container = document.getElementById('attendeesList');
+            const loading = document.getElementById('loadingAttendees');
+            const statusText = document.getElementById('attendeeStatusText');
+
+            callBackend('getAttendees')
+                .then((attendees) => {
+                    loading.style.display = 'none';
+                    statusText.style.display = 'none';
+                    container.innerHTML = '';
+                    
+                    if (attendees && attendees.length > 0) {
+                        renderAttendeesCheckbox(attendees);
+                    } else {
+                        container.innerHTML = '<div class="col-span-full p-4 text-center text-amber-600 border border-dashed border-amber-300 rounded"><i class="fas fa-database mb-1"></i> Database peserta kosong. Klik ikon gerigi (kanan atas) untuk setup database.</div>';
+                    }
+                })
+                .catch((err) => {
+                    loading.style.display = 'none';
+                    statusText.style.display = 'none';
+                    renderAttendeesCheckbox(mockSheetAttendees);
+                });
+        }
+
+        function renderAttendeesCheckbox(list) {
+            const container = document.getElementById('attendeesList');
+            container.innerHTML = '';
+            list.forEach((name) => {
+                const html = `
+                    <label class="flex items-start space-x-2 cursor-pointer group p-1.5 hover:bg-white rounded transition-colors border border-transparent hover:border-[#e5e4df]">
+                        <input type="checkbox" value="${name}" onchange="handleAttendeesChange()" class="attendee-checkbox mt-0.5 w-4 h-4 text-[#2D3A31] bg-white border-slate-300 rounded focus:ring-[#8BA39E]">
+                        <span class="text-sm font-medium text-slate-600 group-hover:text-[#2D3A31] leading-tight">${name}</span>
+                    </label>
+                `;
+                container.insertAdjacentHTML('beforeend', html);
+            });
+        }
+
+        // --- TOGGLE LAINNYA ---
+        function toggleLainnya() {
+            const isChecked = document.getElementById('checkLainnya').checked;
+            const container = document.getElementById('containerLainnya');
+            const input = document.getElementById('inputLainnya');
+            if (isChecked) {
+                container.classList.remove('hidden');
+                input.focus();
+            } else {
+                container.classList.add('hidden');
+                input.value = ''; 
+                handleAttendeesChange();
+            }
+        }
+
+        // --- GET PRESENT ATTENDEES ---
+        function getPresentAttendees() {
+            const presentAttendees = [];
+            document.querySelectorAll('.attendee-checkbox:checked').forEach(cb => {
+                presentAttendees.push(cb.value);
+            });
+            if (document.getElementById('checkLainnya').checked) {
+                const lainnyaStr = document.getElementById('inputLainnya').value.trim();
+                if (lainnyaStr) {
+                    const manualNames = lainnyaStr.split(',').map(n => n.trim()).filter(n => n);
+                    presentAttendees.push(...manualNames);
+                }
+            }
+            return presentAttendees;
+        }
+
+        function handleAttendeesChange() {
+            updatePicDropdowns();
+        }
+
+        // --- UPDATE PIC DROPDOWNS ---
+        function updatePicDropdowns() {
+            const attendees = getPresentAttendees();
+            
+            document.querySelectorAll('.task-pic-select').forEach(select => {
+                const selectedVal = select.value;
+                
+                let optionsHtml = '<option value="">Pilih PIC (Dari Peserta)...</option>';
+                attendees.forEach(name => {
+                    optionsHtml += `<option value="${name}">${name}</option>`;
+                });
+                optionsHtml += '<option value="__custom__">Lainnya (Tulis Manual)...</option>';
+                
+                select.innerHTML = optionsHtml;
+                
+                if (selectedVal === '__custom__' || attendees.includes(selectedVal)) {
+                    select.value = selectedVal;
+                } else {
+                    select.value = "";
+                    const manualInput = select.parentNode.querySelector('.task-pic-manual');
+                    if (manualInput) {
+                        manualInput.classList.add('hidden');
+                        manualInput.value = "";
+                    }
+                }
+            });
+        }
+
+        function handlePicSelectChange(selectElement) {
+            const manualInput = selectElement.parentNode.querySelector('.task-pic-manual');
+            if (selectElement.value === '__custom__') {
+                manualInput.classList.remove('hidden');
+                manualInput.focus();
+                manualInput.required = true;
+            } else {
+                manualInput.classList.add('hidden');
+                manualInput.value = "";
+                manualInput.required = false;
+            }
+        }
+
+        // --- Logika Input Action Items Terintegrasi ---
+        function addCurrentActionItem() {
+            const container = document.getElementById('currentActionItems');
+            const newItem = document.createElement('div');
+            newItem.className = 'action-input-row flex flex-col md:flex-row gap-2 items-start md:items-stretch relative mb-2 bg-[#F6F5F2] md:p-2 border md:border-0 border-[#e5e4df] rounded';
+            
+            newItem.innerHTML = `
+                <input type="text" class="task-desc flex-1 w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-[#8BA39E] focus:border-[#8BA39E] outline-none text-sm" placeholder="Deskripsi Tugas" required>
+                
+                <div class="w-full md:w-56 flex flex-col gap-1">
+                    <select class="task-pic-select w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-[#8BA39E] focus:border-[#8BA39E] outline-none text-sm" onchange="handlePicSelectChange(this)" required>
+                        <option value="">Pilih PIC (Dari Peserta)...</option>
+                        <option value="__custom__">Lainnya (Tulis Manual)...</option>
+                    </select>
+                    <input type="text" class="task-pic-manual hidden w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-[#8BA39E] focus:border-[#8BA39E] outline-none text-sm" placeholder="Ketik nama PIC manual">
+                </div>
+
+                <input type="date" class="task-date w-full md:w-36 p-2 border border-slate-300 rounded focus:ring-2 focus:ring-[#8BA39E] focus:border-[#8BA39E] outline-none text-sm" required>
+                
+                <button type="button" onclick="this.closest('.action-input-row').remove()" class="text-red-400 hover:text-red-600 p-1.5 rounded-full hover:bg-red-50 transition-all flex items-center justify-center self-end md:self-center" title="Hapus Tugas">
+                    <i class="fas fa-times"></i>
+                </button>
+            `;
+            container.appendChild(newItem);
+            updatePicDropdowns();
+        }
+
+        // --- SIMPAN / UPDATE DATA AGENDA ---
+        function saveCurrentAgenda() {
+            const titleInput = document.getElementById('currentAgendaTitle');
+            const notesInput = document.getElementById('currentAgendaNotes');
+            const decisionInput = document.getElementById('currentAgendaDecision');
+            
+            const title = titleInput.value.trim();
+            let notesHtml = notesInput.innerHTML.trim();
+            let decisionHtml = decisionInput.innerHTML.trim();
+
+            if (!title) {
+                showToast("Gagal Menyimpan", "Mohon isi 'Topik Pembahasan' terlebih dahulu sebelum menyimpan agenda.", "error");
+                titleInput.focus();
+                return;
+            }
+
+            // Gabungkan metadata lampiran ke dalam payload HTML agar aman tersimpan di satu kolom Spreadsheet
+            if (currentNotesFiles.length > 0) {
+                notesHtml += `<div class="mom-files-notes" style="display:none;">${JSON.stringify(currentNotesFiles)}</div>`;
+            }
+            if (currentDecisionFiles.length > 0) {
+                decisionHtml += `<div class="mom-files-decision" style="display:none;">${JSON.stringify(currentDecisionFiles)}</div>`;
+            }
+
+            const actionItems = [];
+            document.querySelectorAll('#currentActionItems .action-input-row').forEach(row => {
+                const task = row.querySelector('.task-desc').value.trim();
+                const selectPic = row.querySelector('.task-pic-select').value;
+                const manualPic = row.querySelector('.task-pic-manual').value.trim();
+                const date = row.querySelector('.task-date').value;
+                
+                let finalPic = "";
+                if (selectPic === '__custom__') {
+                    finalPic = manualPic;
+                } else if (selectPic) {
+                    finalPic = selectPic;
+                }
+
+                if (task) {
+                    actionItems.push({ task, pic: finalPic, deadline: date });
+                }
+            });
+
+            const agendaObj = { title, notes: notesHtml, decision: decisionHtml, actionItems };
+
+            if (editingAgendaIndex !== null) {
+                savedAgendasData[editingAgendaIndex] = agendaObj;
+                showToast("Agenda Diperbarui", `Agenda #${editingAgendaIndex + 1} berhasil diperbarui!`, "success");
+                editingAgendaIndex = null;
+                
+                document.getElementById('agendaFormHeader').querySelector('span').innerText = "Form Input Agenda";
+                const saveBtn = document.getElementById('saveAgendaBtn');
+                saveBtn.innerHTML = `<i class="fas fa-save"></i> Simpan & Tambah Agenda Baru`;
+                saveBtn.className = "bg-[#8BA39E] hover:bg-[#728783] text-white px-5 py-2.5 rounded-lg text-sm font-semibold shadow-sm transition-all flex items-center gap-2";
+                
+                const cancelBtn = document.getElementById('cancelEditBtn');
+                if (cancelBtn) cancelBtn.remove();
+            } else {
+                savedAgendasData.push(agendaObj);
+                showToast("Agenda Ditambahkan", "Agenda berhasil dimasukkan ke daftar sementara.", "success");
+            }
+
+            renderSavedAgendas();
+            
+            // Atur ulang formulir ke kondisi kosong
+            titleInput.value = '';
+            notesInput.innerHTML = '';
+            decisionInput.innerHTML = '';
+            document.getElementById('currentActionItems').innerHTML = '';
+            currentNotesFiles = [];
+            currentDecisionFiles = [];
+            renderActiveFilesList('notes');
+            renderActiveFilesList('decision');
+        }
+
+        function removeSavedAgenda(index) {
+            if (confirm(`Apakah Anda yakin ingin menghapus Agenda #${index + 1}?`)) {
+                if (editingAgendaIndex === index) {
+                    cancelAgendaEdit();
+                }
+                savedAgendasData.splice(index, 1);
+                renderSavedAgendas();
+                showToast("Agenda Dihapus", "Agenda berhasil dihapus dari draf.", "info");
+            }
+        }
+
+        // --- PENYUNTINGAN DATA AGENDA (EDIT MODE) ---
+        function editSavedAgenda(index) {
+            const agenda = savedAgendasData[index];
+            editingAgendaIndex = index;
+
+            // Ekstrak data lampiran yang terpisah untuk ditampilkan ke area lampiran khusus
+            const notesData = extractAttachments(agenda.notes, 'notes');
+            const decisionData = extractAttachments(agenda.decision, 'decision');
+
+            document.getElementById('currentAgendaTitle').value = agenda.title;
+            document.getElementById('currentAgendaNotes').innerHTML = notesData.cleanHtml;
+            document.getElementById('currentAgendaDecision').innerHTML = decisionData.cleanHtml;
+
+            // Masukkan data lampiran ke array state dan render UI
+            currentNotesFiles = [...notesData.files];
+            currentDecisionFiles = [...decisionData.files];
+            renderActiveFilesList('notes');
+            renderActiveFilesList('decision');
+
+            const actionContainer = document.getElementById('currentActionItems');
+            actionContainer.innerHTML = '';
+
+            if (agenda.actionItems && agenda.actionItems.length > 0) {
+                agenda.actionItems.forEach(item => {
+                    const newItem = document.createElement('div');
+                    newItem.className = 'action-input-row flex flex-col md:flex-row gap-2 items-start md:items-stretch relative mb-2 bg-[#F6F5F2] md:p-2 border md:border-0 border-[#e5e4df] rounded';
+                    
+                    newItem.innerHTML = `
+                        <input type="text" class="task-desc flex-1 w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-[#8BA39E] focus:border-[#8BA39E] outline-none text-sm" placeholder="Deskripsi Tugas" value="${item.task}" required>
+                        
+                        <div class="w-full md:w-56 flex flex-col gap-1">
+                            <select class="task-pic-select w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-[#8BA39E] focus:border-[#8BA39E] outline-none text-sm" onchange="handlePicSelectChange(this)" required>
+                                <option value="">Pilih PIC (Dari Peserta)...</option>
+                                <option value="__custom__">Lainnya (Tulis Manual)...</option>
+                            </select>
+                            <input type="text" class="task-pic-manual hidden w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-[#8BA39E] focus:border-[#8BA39E] outline-none text-sm" placeholder="Ketik nama PIC manual">
+                        </div>
+
+                        <input type="date" class="task-date w-full md:w-36 p-2 border border-slate-300 rounded focus:ring-2 focus:ring-[#8BA39E] focus:border-[#8BA39E] outline-none text-sm" value="${item.deadline}" required>
+                        
+                        <button type="button" onclick="this.closest('.action-input-row').remove()" class="text-red-400 hover:text-red-600 p-1.5 rounded-full hover:bg-red-50 transition-all flex items-center justify-center self-end md:self-center" title="Hapus Tugas">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    `;
+                    actionContainer.appendChild(newItem);
+
+                    const select = newItem.querySelector('.task-pic-select');
+                    const manualInput = newItem.querySelector('.task-pic-manual');
+                    
+                    updatePicDropdowns();
+
+                    const attendees = getPresentAttendees();
+                    if (attendees.includes(item.pic)) {
+                        select.value = item.pic;
+                    } else if (item.pic) {
+                        select.value = '__custom__';
+                        manualInput.value = item.pic;
+                        manualInput.classList.remove('hidden');
+                        manualInput.required = true;
+                    }
+                });
+            }
+
+            document.getElementById('agendaFormHeader').querySelector('span').innerText = `Sedang Menyunting Agenda #${index + 1}`;
+            const saveBtn = document.getElementById('saveAgendaBtn');
+            saveBtn.innerHTML = `<i class="fas fa-check-double text-white"></i> Perbarui Agenda #${index + 1}`;
+            saveBtn.className = "bg-[#D1A792] hover:bg-[#b58f7a] text-white px-5 py-2.5 rounded-lg text-sm font-semibold shadow-sm transition-all flex items-center gap-2";
+
+            let cancelBtn = document.getElementById('cancelEditBtn');
+            if (!cancelBtn) {
+                cancelBtn = document.createElement('button');
+                cancelBtn.type = 'button';
+                cancelBtn.id = 'cancelEditBtn';
+                cancelBtn.onclick = cancelAgendaEdit;
+                cancelBtn.className = "bg-white border border-[#e5e4df] text-[#2D3A31] px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-slate-50 transition-all flex items-center gap-2 shadow-sm";
+                cancelBtn.innerHTML = `<i class="fas fa-ban"></i> Batal Edit`;
+                saveBtn.parentNode.insertBefore(cancelBtn, saveBtn);
+            }
+
+            document.getElementById('agendaInputForm').scrollIntoView({ behavior: 'smooth', block: 'center' });
+            showToast("Mode Edit Ke-aktifan", `Sedang menyunting data Agenda #${index + 1}`, "info");
+        }
+
+        // --- BATALKAN EDIT AGENDA ---
+        function cancelAgendaEdit() {
+            editingAgendaIndex = null;
+
+            document.getElementById('currentAgendaTitle').value = '';
+            document.getElementById('currentAgendaNotes').innerHTML = '';
+            document.getElementById('currentAgendaDecision').innerHTML = '';
+            document.getElementById('currentActionItems').innerHTML = '';
+
+            currentNotesFiles = [];
+            currentDecisionFiles = [];
+            renderActiveFilesList('notes');
+            renderActiveFilesList('decision');
+
+            document.getElementById('agendaFormHeader').querySelector('span').innerText = "Form Input Agenda";
+            const saveBtn = document.getElementById('saveAgendaBtn');
+            saveBtn.innerHTML = `<i class="fas fa-save"></i> Simpan & Tambah Agenda Baru`;
+            saveBtn.className = "bg-[#8BA39E] hover:bg-[#728783] text-white px-5 py-2.5 rounded-lg text-sm font-semibold shadow-sm transition-all flex items-center gap-2";
+
+            const cancelBtn = document.getElementById('cancelEditBtn');
+            if (cancelBtn) cancelBtn.remove();
+
+            showToast("Edit Dibatalkan", "Formulir dikosongkan kembali.", "info");
+        }
+
+        // --- RENDER AGENDA SEBAGAI AKORDION INTERAKTIF ---
+        function renderSavedAgendas() {
+            const container = document.getElementById('savedAgendasContainer');
+            container.innerHTML = '';
+
+            savedAgendasData.forEach((agenda, index) => {
+                let actionItemsHtml = '';
+                if (agenda.actionItems.length > 0) {
+                    const rows = agenda.actionItems.map(item => `
+                        <li class="flex flex-col md:flex-row md:items-center justify-between text-sm border-b border-[#e5e4df] py-2 last:border-0 gap-1 md:gap-4">
+                            <span class="flex-1 text-slate-700 font-medium">🔹 ${item.task}</span>
+                            <div class="flex gap-4 text-xs">
+                                <span class="w-28 text-slate-600 bg-white border border-[#e5e4df] px-2 py-0.5 rounded shadow-sm truncate" title="${item.pic || '-'}"><i class="fas fa-user mr-1 text-[#D1A792]"></i> ${item.pic || '-'}</span>
+                                <span class="w-28 text-slate-500 bg-white border border-[#e5e4df] px-2 py-0.5 rounded shadow-sm"><i class="far fa-calendar-alt mr-1 text-[#D1A792]"></i> ${item.deadline || '-'}</span>
+                            </div>
+                        </li>
+                    `).join('');
+                    actionItemsHtml = `
+                        <div class="mt-3 bg-[#F6F5F2] p-3 rounded-lg border border-[#e5e4df]">
+                            <h5 class="text-xs font-bold text-[#8BA39E] uppercase tracking-wider mb-2"><i class="fas fa-check-square mr-1"></i> Tindak Lanjut:</h5>
+                            <ul class="space-y-1">${rows}</ul>
+                        </div>
+                    `;
+                }
+
+                // Pecah teks pembahasan dengan lampirannya
+                const notesData = extractAttachments(agenda.notes, 'notes');
+                const decisionData = extractAttachments(agenda.decision, 'decision');
+
+                let notesFilesHtml = '';
+                if (notesData.files.length > 0) {
+                    notesFilesHtml = `<div class="mt-2 flex flex-wrap gap-1.5">` + 
+                        notesData.files.map(f => `
+                            <a href="${f.url}" target="_blank" class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-[#e5e4df] rounded text-slate-700 text-xs font-semibold hover:bg-slate-100 transition-colors shadow-sm">
+                                <i class="fas fa-paperclip text-slate-400"></i> ${f.name}
+                            </a>
+                        `).join('') + `</div>`;
+                }
+
+                let decisionFilesHtml = '';
+                if (decisionData.files.length > 0) {
+                    decisionFilesHtml = `<div class="mt-2 flex flex-wrap gap-1.5">` + 
+                        decisionData.files.map(f => `
+                            <a href="${f.url}" target="_blank" class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-amber-200 rounded text-slate-700 text-xs font-semibold hover:bg-amber-50 transition-colors shadow-sm">
+                                <i class="fas fa-paperclip text-amber-500"></i> ${f.name}
+                            </a>
+                        `).join('') + `</div>`;
+                }
+
+                const agendaHtml = `
+                    <div class="bg-white border border-[#e5e4df] rounded-lg overflow-hidden shadow-sm hover:shadow transition-all relative">
+                        <div onclick="toggleAccordion(${index})" class="flex justify-between items-center p-3 md:p-4 bg-[#F6F5F2] cursor-pointer hover:bg-slate-100 transition-colors">
+                            <div class="flex items-center gap-2 md:gap-3 mr-4">
+                                <span class="bg-[#2D3A31] text-white text-[10px] md:text-xs font-bold px-2 py-1 rounded whitespace-nowrap">Agenda #${index + 1}</span>
+                                <h4 class="font-bold text-[#2D3A31] text-xs md:text-sm truncate max-w-[150px] sm:max-w-md" title="${agenda.title}">${agenda.title}</h4>
+                                ${agenda.actionItems.length > 0 ? `<span class="bg-[#D1A792]/20 text-[#2D3A31] text-[10px] font-bold px-1.5 py-0.5 rounded-full"><i class="fas fa-tasks mr-1"></i>${agenda.actionItems.length}</span>` : ''}
+                            </div>
+                            <div class="flex items-center gap-2" onclick="event.stopPropagation()">
+                                <button type="button" onclick="editSavedAgenda(${index})" class="text-xs text-indigo-600 bg-indigo-50 hover:bg-indigo-100 py-1 px-2.5 rounded transition-all font-semibold flex items-center gap-1">
+                                    <i class="fas fa-edit"></i> Edit
+                                </button>
+                                <button type="button" onclick="removeSavedAgenda(${index})" class="text-xs text-red-600 bg-red-50 hover:bg-red-100 py-1 px-2.5 rounded transition-all font-semibold flex items-center gap-1">
+                                    <i class="fas fa-trash-alt"></i> Hapus
+                                </button>
+                                <span id="chevron-${index}" class="text-slate-400 transform transition-transform duration-200 ml-1">
+                                    <i class="fas fa-chevron-down"></i>
+                                </span>
+                            </div>
+                        </div>
+                        
+                        <div id="content-${index}" class="hidden p-4 border-t border-[#e5e4df] space-y-4 bg-white">
+                            <div>
+                                <span class="block text-[10px] font-bold text-[#8BA39E] uppercase tracking-wider mb-1">Catatan Pembahasan:</span>
+                                <div class="text-slate-700 text-sm bg-slate-50 p-3 rounded-lg border border-[#e5e4df] leading-relaxed mom-notes-rendered">${notesData.cleanHtml || 'Tidak ada catatan pembahasan.'}</div>
+                                ${notesFilesHtml}
+                            </div>
+                            <div>
+                                <span class="block text-[10px] font-bold text-[#8BA39E] uppercase tracking-wider mb-1">Keputusan Bersama:</span>
+                                <div class="text-slate-700 text-sm font-semibold italic bg-amber-50/30 p-3 rounded-lg border border-amber-100 leading-relaxed mom-notes-rendered">${decisionData.cleanHtml || 'Tidak ada keputusan spesifik yang dicatat.'}</div>
+                                ${decisionFilesHtml}
+                            </div>
+                            ${actionItemsHtml}
+                        </div>
+                    </div>
+                `;
+                container.insertAdjacentHTML('beforeend', agendaHtml);
+            });
+        }
+
+        function toggleAccordion(index) {
+            const content = document.getElementById(`content-${index}`);
+            const chevron = document.getElementById(`chevron-${index}`);
+            
+            if (content.classList.contains('hidden')) {
+                content.classList.remove('hidden');
+                chevron.classList.add('rotate-180');
+            } else {
+                content.classList.add('hidden');
+                chevron.classList.remove('rotate-180');
+            }
+        }
+
+        // --- FORMAT TANGGAL KE BAHASA INDONESIA INDAH ---
+        function formatDateToIndonesian(dateStr) {
+            if (!dateStr || dateStr === '-') return '-';
+            try {
+                const parts = dateStr.split('-');
+                if (parts.length === 3) {
+                    const months = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+                    const day = parseInt(parts[2], 10);
+                    const monthIndex = parseInt(parts[1], 10) - 1;
+                    const year = parts[0];
+                    return `${day} ${months[monthIndex]} ${year}`;
+                }
+                return dateStr;
+            } catch(e) {
+                return dateStr;
+            }
+        }
+
+        // --- FORMAT TANGGAL PENDEK INDONESIA (dd/MM/yyyy) ---
+        function formatDateToIDShort(dateStr) {
+            if (!dateStr || dateStr === '-') return '-';
+            try {
+                const parts = dateStr.split('-');
+                if (parts.length === 3) {
+                    return `${parts[2]}/${parts[1]}/${parts[0]}`;
+                }
+                return dateStr;
+            } catch(e) {
+                return dateStr;
+            }
+        }
+
+        // --- FORMAT WAKTU ---
+        function getFormattedTime() {
+            const startHour = document.getElementById('meetingTimeStartHour').value;
+            const startMin = document.getElementById('meetingTimeStartMin').value;
+            const endHour = document.getElementById('meetingTimeEndHour').value;
+            const endMin = document.getElementById('meetingTimeEndMin').value;
+            
+            if (startHour && startMin && endHour && endMin) {
+                return `${startHour}:${startMin} - ${endHour}:${endMin}`;
+            }
+            return '-';
+        }
+
+        function getFormData() {
+            return {
+                idRapat: currentIdRapat, 
+                title: document.getElementById('meetingTitle').value || '-',
+                date: document.getElementById('meetingDate').value || '-',
+                time: getFormattedTime(),
+                location: document.getElementById('meetingLocation').value || '-',
+                attendees: getPresentAttendees(),
+                agendas: savedAgendasData
+            };
+        }
+
+        // --- PROSES SUBMIT DATABASE UTAMA ---
+        function handleSubmit(event) {
+            event.preventDefault();
+            
+            if (document.getElementById('currentAgendaTitle').value.trim() !== '') {
+                if(!confirm("Peringatan: Ada isian Agenda yang belum di-klik 'Simpan'. Lanjutkan submit tanpa menyimpan agenda tersebut?")) return;
+            }
+
+            const btn = document.getElementById('submitBtn');
+            const originalBtnHtml = btn.innerHTML;
+            
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Menyimpan...';
+            btn.disabled = true;
+
+            const momData = getFormData();
+
+            callBackend('saveMoM', momData)
+                .then((message) => {
+                    document.getElementById('momForm').classList.add('hidden');
+                    document.getElementById('successMessage').classList.remove('hidden');
+                    document.getElementById('successDesc').innerText = message;
+                    showToast("Koneksi Berhasil", "Data sukses disimpan ke Google Sheets!", "success");
+                    btn.innerHTML = originalBtnHtml;
+                    btn.disabled = false;
+                    
+                    document.getElementById('editModeBanner').classList.add('hidden');
+                    currentIdRapat = null;
+                })
+                .catch((err) => {
+                    showToast("Gagal Menyimpan", "Gagal menyimpan ke Google Sheet: " + err.message, "error");
+                    btn.innerHTML = originalBtnHtml;
+                    btn.disabled = false;
+                });
+        }
+
+        // --- SETTING & RIWAYAT LOGIKA (MODAL SETUP) ---
+        function openSetupModal() {
+            document.getElementById('setupModal').classList.remove('hidden');
+            loadMoMHistoryDropdown(); 
+        }
+
+        // Menutup modal setting dan memuat ulang list peserta jikalau ada perubahan koneksi backend
+        function closeSetupModal() {
+            document.getElementById('setupModal').classList.add('hidden');
+            loadAttendees();
+        }
+
+        // Memuat daftar riwayat MoM dari server ke dalam dropdown
+        function loadMoMHistoryDropdown() {
+            const select = document.getElementById('selectMoM');
+            const dateInput = document.getElementById('filterMoMDate');
+            const statusText = document.getElementById('filterStatusText');
+            const btnLoad = document.getElementById('btnLoadSelected');
+
+            dateInput.value = '';
+            select.innerHTML = '<option value="">-- Pilih Tanggal Terlebih Dahulu --</option>';
+            select.disabled = true;
+            select.className = "w-full p-2.5 border border-slate-300 rounded-lg text-xs bg-slate-100 outline-none";
+            statusText.classList.add('hidden');
+            btnLoad.disabled = true;
+            btnLoad.classList.add('opacity-50', 'cursor-not-allowed');
+
+            callBackend('getMoMList')
+                .then((list) => {
+                    allMoMsData = list || [];
+                })
+                .catch((err) => {
+                    allMoMsData = [];
+                    select.innerHTML = '<option value="">-- Gagal memuat data rapat --</option>';
+                });
+        }
+
+        // Menyaring daftar MoM berdasarkan Tanggal yang dipilih (Aman & Sinkron)
+        function filterMoMByDate() {
+            const dateInput = document.getElementById('filterMoMDate').value; // Mengembalikan format "yyyy-MM-dd"
+            const select = document.getElementById('selectMoM');
+            const statusText = document.getElementById('filterStatusText');
+            const btnLoad = document.getElementById('btnLoadSelected');
+
+            if (!dateInput) {
+                select.innerHTML = '<option value="">-- Pilih Tanggal Terlebih Dahulu --</option>';
+                select.disabled = true;
+                select.className = "w-full p-2.5 border border-slate-300 rounded-lg text-xs bg-slate-100 outline-none";
+                statusText.classList.add('hidden');
+                btnLoad.disabled = true;
+                btnLoad.classList.add('opacity-50', 'cursor-not-allowed');
+                return;
+            }
+
+            // Membandingkan dengan key "yyyy-MM-dd" standar yang dijamin sinkron dari database
+            const filteredMoMs = allMoMsData.filter(item => item.tanggalRapat === dateInput);
+
+            select.innerHTML = '';
+            statusText.classList.remove('hidden');
+
+            if (filteredMoMs.length > 0) {
+                select.disabled = false;
+                select.className = "w-full p-2.5 border border-slate-300 rounded-lg text-xs bg-white focus:ring-2 focus:ring-[#8BA39E] focus:border-[#8BA39E] outline-none";
+                
+                const defaultOpt = document.createElement('option');
+                defaultOpt.value = "";
+                defaultOpt.innerText = `-- Terdeteksi ${filteredMoMs.length} Rapat --`;
+                select.appendChild(defaultOpt);
+
+                filteredMoMs.forEach(item => {
+                    const opt = document.createElement('option');
+                    opt.value = item.idRapat;
+                    opt.innerText = item.judulRapat;
+                    select.appendChild(opt);
+                });
+
+                statusText.className = "text-[11px] font-semibold text-emerald-600 mt-1";
+                statusText.innerHTML = `<i class="fas fa-check-circle"></i> Ditemukan ${filteredMoMs.length} rapat pada tanggal ini.`;
+                
+                select.onchange = function() {
+                    if (this.value) {
+                        btnLoad.disabled = false;
+                        btnLoad.classList.remove('opacity-50', 'cursor-not-allowed');
+                    } else {
+                        btnLoad.disabled = true;
+                        btnLoad.classList.add('opacity-50', 'cursor-not-allowed');
+                    }
+                };
+            } else {
+                select.disabled = true;
+                select.className = "w-full p-2.5 border border-slate-300 rounded-lg text-xs bg-slate-100 outline-none";
+                const opt = document.createElement('option');
+                opt.value = "";
+                opt.innerText = "-- Tidak ada rapat pada tanggal ini --";
+                select.appendChild(opt);
+
+                statusText.className = "text-[11px] font-semibold text-red-500 mt-1";
+                statusText.innerHTML = `<i class="fas fa-times-circle"></i> Tidak ada agenda rapat pada tanggal tersebut.`;
+                btnLoad.disabled = true;
+                btnLoad.classList.add('opacity-50', 'cursor-not-allowed');
+            }
+        }
+
+        // Membuka MoM lama yang dipilih untuk di-edit kembali
+        function loadSelectedMoM() {
+            const select = document.getElementById('selectMoM');
+            const idRapat = select.value;
+
+            if (!idRapat) {
+                alert("Mohon pilih salah satu MoM terlebih dahulu!");
+                return;
+            }
+
+            showToast("Sedang Memuat", "Mengambil rincian data rapat lama...", "info");
+
+            callBackend('getMoMDetails', idRapat)
+                .then((response) => {
+                    const info = response.info;
+                    const agendas = response.agendas;
+
+                    currentIdRapat = info.idRapat; 
+
+                    document.getElementById('meetingTitle').value = info.title;
+                    document.getElementById('meetingDate').value = info.date;
+                    document.getElementById('meetingLocation').value = info.location;
+
+                    if (info.time && info.time !== '-') {
+                        const parts = info.time.split(' - ');
+                        if (parts.length === 2) {
+                            const startParts = parts[0].split(':');
+                            const endParts = parts[1].split(':');
+                            if (startParts.length === 2) {
+                                document.getElementById('meetingTimeStartHour').value = startParts[0];
+                                document.getElementById('meetingTimeStartMin').value = startParts[1];
+                            }
+                            if (endParts.length === 2) {
+                                document.getElementById('meetingTimeEndHour').value = endParts[0];
+                                document.getElementById('meetingTimeEndMin').value = endParts[1];
+                            }
+                        }
+                    }
+
+                    document.querySelectorAll('.attendee-checkbox').forEach(cb => cb.checked = false);
+                    document.getElementById('checkLainnya').checked = false;
+                    document.getElementById('containerLainnya').classList.add('hidden');
+                    document.getElementById('inputLainnya').value = '';
+
+                    const otherAttendees = [];
+                    if (info.attendees && info.attendees.length > 0) {
+                        info.attendees.forEach(name => {
+                            let found = false;
+                            document.querySelectorAll('.attendee-checkbox').forEach(cb => {
+                                if (cb.value === name) {
+                                    cb.checked = true;
+                                    found = true;
+                                }
+                            });
+                            if (!found && name !== "-") {
+                                otherAttendees.push(name);
+                            }
+                        });
+                    }
+
+                    if (otherAttendees.length > 0) {
+                        document.getElementById('checkLainnya').checked = true;
+                        document.getElementById('containerLainnya').classList.remove('hidden');
+                        document.getElementById('inputLainnya').value = otherAttendees.join(', ');
+                    }
+
+                    handleAttendeesChange();
+
+                    savedAgendasData = agendas.map(ag => ({
+                        title: ag.title,
+                        notes: ag.notes,
+                        decision: ag.decision,
+                        actionItems: ag.actionItems || []
+                    }));
+
+                    renderSavedAgendas();
+
+                    document.getElementById('editModeTargetId').innerText = info.idRapat;
+                    document.getElementById('editModeBanner').classList.remove('hidden');
+
+                    showToast("Berhasil Dimuat", "MoM lama berhasil dimuat ke dalam formulir pengeditan.", "success");
+                    closeSetupModal();
+                })
+                .catch((err) => {
+                    showToast("Gagal Memuat", "Kesalahan saat memuat detail MoM: " + err.message, "error");
+                });
+        }
+
+        function cancelMoMEdit() {
+            currentIdRapat = null;
+            document.getElementById('editModeBanner').classList.add('hidden');
+            resetForm();
+            showToast("Mode Edit Berakhir", "Formulir diatur ulang ke mode draf MoM baru.", "info");
+        }
+
+        function executeDatabaseSetup() {
+            const btn = document.getElementById('btnInitDb');
+            const originalBtn = btn.innerHTML;
+
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Menginisialisasi...';
+            btn.disabled = true;
+
+            callBackend('setupDatabase')
+                .then((msg) => {
+                    showToast("Setup Sukses", msg, "success");
+                    btn.innerHTML = originalBtn;
+                    btn.disabled = false;
+                    closeSetupModal();
+                    loadAttendees(); 
+                })
+                .catch((err) => {
+                    showToast("Setup Gagal", "Error: " + err.message, "error");
+                    btn.innerHTML = originalBtn;
+                    btn.disabled = false;
+                });
+        }
+
+        // --- FUNGSI UNTUK MENGISI DATA KE TEMPLAT PDF ---
+        function populatePDFData() {
+            const data = getFormData();
+            
+            document.getElementById('pdfDate').innerText = formatDateToIndonesian(data.date);
+            document.getElementById('pdfTime').innerText = data.time;
+            document.getElementById('pdfLocation').innerText = data.location;
+            document.getElementById('pdfTitle').innerText = data.title;
+
+            const attContainer = document.getElementById('pdfAttendees');
+            // Ditampilkan checklist centang yang bersih (tanpa bulatan hitam bullet ganda)
+            attContainer.innerHTML = data.attendees.length > 0 
+                ? data.attendees.map(a => `<li class="border-b border-[#e5e4df] py-1.5 last:border-0"><i class="fas fa-check text-[#8BA39E] mr-2 text-xs"></i>${a}</li>`).join('')
+                : '<li class="italic text-slate-400">Tidak ada data</li>';
+
+            const discContainer = document.getElementById('pdfDiscussions');
+            discContainer.innerHTML = '';
+
+            if (data.agendas.length === 0) {
+                discContainer.innerHTML = '<p class="italic text-slate-400">Tidak ada agenda yang dicatat.</p>';
+            } else {
+                data.agendas.forEach((ag, idx) => {
+                    let actionItemsHtml = '';
+                    if(ag.actionItems.length > 0) {
+                        const actRows = ag.actionItems.map(act => `
+                            <div class="flex justify-between items-center text-[0.85rem] text-slate-700 bg-[#F6F5F2] p-2 rounded mb-1 border border-[#e5e4df]">
+                                <span class="font-medium flex-1 mr-2"><i class="fas fa-caret-right text-[#D1A792] mr-1"></i> ${act.task}</span>
+                                <div class="flex gap-4 text-slate-500 whitespace-nowrap">
+                                    <span><i class="fas fa-user text-[#D1A792] mr-1"></i> ${act.pic || '-'}</span>
+                                    <span><i class="far fa-calendar-alt text-[#D1A792] mr-1"></i> ${formatDateToIDShort(act.deadline) || '-'}</span>
+                                </div>
+                            </div>
+                        `).join('');
+
+                        actionItemsHtml = `
+                            <div class="bg-white p-3 rounded shadow-sm border-t-[3px] border-[#D1A792] mt-3">
+                                <div class="flex items-center gap-2 border-b border-[#F6F5F2] pb-1.5 mb-2">
+                                    <i class="fas fa-check-square text-[#D1A792] text-xs"></i>
+                                    <h5 class="text-[#2D3A31] font-bold uppercase text-[10px] tracking-wide">Tindak Lanjut</h5>
+                                </div>
+                                <div class="flex flex-col">
+                                    ${actRows}
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    // Ekstrak data lampiran yang terpisah untuk dicetak di PDF
+                    const notesData = extractAttachments(ag.notes, 'notes');
+                    const decisionData = extractAttachments(ag.decision, 'decision');
+
+                    let notesFilesPdf = '';
+                    if (notesData.files.length > 0) {
+                        // Diubah dari <span> ke <a> agar tautan dapat diklik secara interaktif pada file PDF hasil unduhan
+                        notesFilesPdf = `<div class="mt-1 flex flex-wrap gap-1.5 pl-3">` + 
+                            notesData.files.map(f => `
+                                <a href="${f.url}" target="_blank" class="inline-flex items-center gap-1.5 px-2 py-0.5 bg-slate-100 border border-[#e5e4df] rounded text-slate-700 text-[10px] font-medium decoration-none" style="text-decoration: none !important; color: #1e293b;">
+                                    <i class="fas fa-paperclip text-slate-400"></i> ${f.name}
+                                </a>
+                            `).join('') + `</div>`;
+                    }
+
+                    let decisionFilesPdf = '';
+                    if (decisionData.files.length > 0) {
+                        // Diubah dari <span> ke <a> agar tautan dapat diklik secara interaktif pada file PDF hasil unduhan
+                        decisionFilesPdf = `<div class="mt-1 flex flex-wrap gap-1.5 pl-3">` + 
+                            decisionData.files.map(f => `
+                                <a href="${f.url}" target="_blank" class="inline-flex items-center gap-1.5 px-2 py-0.5 bg-amber-50 border border-amber-200 rounded text-slate-700 text-[10px] font-medium decoration-none" style="text-decoration: none !important; color: #1e293b;">
+                                    <i class="fas fa-paperclip text-amber-500"></i> ${f.name}
+                                </a>
+                            `).join('') + `</div>`;
+                    }
+
+                    discContainer.insertAdjacentHTML('beforeend', `
+                        <div class="mb-6 p-5 bg-[#F6F5F2] border border-[#e5e4df] rounded-lg pdf-page-break-avoid">
+                            <h4 class="font-bold text-[#2D3A31] text-base border-b-2 border-[#8BA39E] pb-2 mb-3">
+                                <span class="text-[#D1A792] font-black mr-1">AGENDA ${idx + 1}:</span> ${ag.title}
+                            </h4>
+                            <div class="space-y-3 text-[0.9rem] leading-relaxed">
+                                <div>
+                                    <span class="block text-[10px] font-bold text-[#8BA39E] uppercase tracking-wider">Catatan:</span>
+                                    <div class="text-slate-700 mt-0.5 pl-3 border-l-2 border-slate-300 mom-notes-rendered">${notesData.cleanHtml || '-'}</div>
+                                    ${notesFilesPdf}
+                                </div>
+                                <div>
+                                    <span class="block text-[10px] font-bold text-[#8BA39E] uppercase tracking-wider">Keputusan:</span>
+                                    <div class="text-slate-700 font-semibold italic mt-0.5 pl-3 border-l-2 border-[#D1A792] mom-notes-rendered">${decisionData.cleanHtml || '-'}</div>
+                                    ${decisionFilesPdf}
+                                </div>
+                                ${actionItemsHtml}
+                            </div>
+                        </div>
+                    `);
+                });
+            }
+        }
+
+        // --- PROSES BERBAGI KE WHATSAPP ---
+        function shareToWhatsApp() {
+            if (document.getElementById('currentAgendaTitle').value.trim() !== '') {
+                saveCurrentAgenda();
+            }
+
+            const data = getFormData();
+            const dateStr = formatDateToIndonesian(data.date);
+            const filename = `MoM_${data.date || 'TanpaTanggal'}.pdf`;
+
+            let waText = `*📄 MINUTES OF MEETING (MoM)*\n\n`;
+            waText += `*Judul Rapat:* ${data.title}\n`;
+            waText += `*Tanggal:* ${dateStr}\n`;
+            waText += `*Waktu:* ${data.time}\n`;
+            waText += `*Lokasi:* ${data.location}\n\n`;
+            
+            waText += `*👥 DAFTAR HADIR:*\n`;
+            if (data.attendees.length > 0) {
+                data.attendees.forEach(name => {
+                    waText += `• ${name}\n`;
+                });
+            } else {
+                waText += `Tidak ada peserta yang tercatat.\n`;
+            }
+            waText += `\n`;
+
+            waText += `*📌 RINGKASAN DISKUSI, KEPUTUSAN & TUGAS:*\n`;
+            if (data.agendas.length > 0) {
+                data.agendas.forEach((ag, idx) => {
+                    const notesData = extractAttachments(ag.notes, 'notes');
+                    const decisionData = extractAttachments(ag.decision, 'decision');
+
+                    const cleanNotes = notesData.cleanHtml.replace(/<\/?[^>]+(>|$)/g, " ");
+                    const cleanDecision = decisionData.cleanHtml.replace(/<\/?[^>]+(>|$)/g, " ");
+                    
+                    let notesFilesWa = "";
+                    if (notesData.files.length > 0) {
+                        notesFilesWa = "\n   _Lampiran Pembahasan:_ " + notesData.files.map(f => `📎 ${f.name}: ${f.url}`).join(', ');
+                    }
+                    
+                    let decisionFilesWa = "";
+                    if (decisionData.files.length > 0) {
+                        decisionFilesWa = "\n   _Lampiran Keputusan:_ " + decisionData.files.map(f => `📎 ${f.name}: ${f.url}`).join(', ');
+                    }
+                    
+                    waText += `*${idx + 1}. Topik Pembahasan: ${ag.title}*\n`;
+                    waText += `   Catatan: _${cleanNotes || '-'}_${notesFilesWa}\n`;
+                    waText += `   Keputusan: *${cleanDecision || '-'}*${decisionLinks}\n`;
+                    
+                    if (ag.actionItems && ag.actionItems.length > 0) {
+                        waText += `   _Tindak Lanjut (Action Items):_\n`;
+                        ag.actionItems.forEach(item => {
+                            waText += `   🔹 ${item.task}\n`;
+                            waText += `      └ PIC: *${item.pic || '-'}* | DL: *${formatDateToIDShort(item.deadline) || '-'}*\n`;
+                        });
+                    }
+                    waText += `\n`;
+                });
+            } else {
+                waText += `Tidak ada agenda yang dicatat.\n`;
+            }
+            
+            waText += `_Dikirim otomatis via Formulir Minutes of Meeting_`;
+            openWhatsAppTextFallback(waText);
+        }
+
+        function openWhatsAppTextFallback(text) {
+            showToast("Membuka WhatsApp", "Mengirimkan teks ringkasan MoM ke WhatsApp...", "info");
+            const encodedText = encodeURIComponent(text);
+            const whatsappUrl = `https://api.whatsapp.com/send?text=${encodedText}`;
+            window.open(whatsappUrl, '_blank');
+        }
+
+        function resetForm() {
+            document.getElementById('momForm').reset();
+            savedAgendasData = [];
+            editingAgendaIndex = null;
+            currentIdRapat = null;
+            document.getElementById('editModeBanner').classList.add('hidden');
+            renderSavedAgendas();
+            document.getElementById('currentActionItems').innerHTML = '';
+            document.getElementById('containerLainnya').classList.add('hidden');
+            
+            document.getElementById('meetingTimeStartHour').value = '09';
+            document.getElementById('meetingTimeStartMin').value = '00';
+            document.getElementById('meetingTimeEndHour').value = '10';
+            document.getElementById('meetingTimeEndMin').value = '00';
+
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('meetingDate').value = today;
+
+            document.getElementById('successMessage').classList.add('hidden');
+            document.getElementById('momForm').classList.remove('hidden');
+
+            // Reset state lampiran aktif
+            currentNotesFiles = [];
+            currentDecisionFiles = [];
+            renderActiveFilesList('notes');
+            renderActiveFilesList('decision');
+        }
+
+        // --- LOGIKA PRATINJAU ---
+        function openPreview() {
+            if(document.getElementById('currentAgendaTitle').value.trim() !== '') {
+                saveCurrentAgenda();
+            }
+
+            populatePDFData();
+
+            const modal = document.getElementById('pdfModal');
+            modal.classList.remove('hidden');
+            
+            adjustPreviewScale();
+        }
+
+        function adjustPreviewScale() {
+            const paper = document.getElementById('pdfContent');
+            const container = document.getElementById('previewCanvasContainer');
+            const containerWidth = container.clientWidth - 32; 
+            
+            if (containerWidth < 794) {
+                const scale = containerWidth / 794;
+                paper.style.transform = `scale(${scale})`;
+                paper.style.marginBottom = `-${1123 * (1 - scale)}px`; 
+            } else {
+                paper.style.transform = 'none';
+                paper.style.marginBottom = '0px';
+            }
+        }
+
+        window.addEventListener('resize', () => {
+            if (!document.getElementById('pdfModal').classList.contains('hidden')) {
+                adjustPreviewScale();
+            }
+        });
+
+        function closePreview() {
+            document.getElementById('pdfModal').classList.add('hidden');
+        }
+
+        // --- KONFIGURASI PDF ---
+        function getPDFOptions(filename) {
+            return {
+                margin:       0, 
+                filename:     filename,
+                image:        { type: 'jpeg', quality: 0.98 },
+                enableLinks:  true, // PENTING: Mengaktifkan tautan <a> aktif agar dapat diklik pada file PDF hasil unduhan!
+                html2canvas:  { 
+                    scale: 3, // PENTING: Meningkatkan skala render dari 2 ke 3 untuk menghasilkan PDF HD yang sangat tajam dan tidak buram!
+                    useCORS: true, 
+                    logging: false,
+                    scrollX: 0,
+                    scrollY: 0
+                },
+                jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+            };
+        }
+
+        // --- PROSES UNDUH PDF ---
+        function performDownload() {
+            const element = document.getElementById('pdfContent');
+            const dateStr = getFormData().date || 'TanpaTanggal';
+            const opt = getPDFOptions(`MoM_${dateStr}.pdf`);
+            
+            const originalTransform = element.style.transform;
+            const originalMargin = element.style.marginBottom;
+            
+            element.style.transform = 'none';
+            element.style.marginBottom = '0px';
+
+            html2pdf().set(opt).from(element).save().then(() => {
+                element.style.transform = originalTransform;
+                element.style.marginBottom = originalMargin;
+                showToast("Download Selesai", "Laporan PDF berhasil diunduh ke perangkat Anda.", "success");
+            }).catch(err => {
+                element.style.transform = originalTransform;
+                element.style.marginBottom = originalMargin;
+                showToast("Gagal Mengunduh", "Terjadi kesalahan saat mengekspor PDF.", "error");
+            });
+        }
+    </script>
+</body>
+</html>
